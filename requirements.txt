@@ -1,0 +1,8 @@
+hydrogram>=0.2.0
+aiohttp>=3.9.0
+yt-dlp>=2024.8.6
+mutagen>=1.47.0
+Pillow>=10.0.0
+cryptg>=0.6.0
+pycryptodome>=3.20.0
+requests>=2.31.0

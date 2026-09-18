@@ -1,0 +1,21 @@
+# Virtual Environment
+venv/
+.venv/
+env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Temporary downloads
+downloads/
+temp/
+*.session
+*.session-journal
+
+# Secrets
+config.json
+
+# Packages
+*.zip
