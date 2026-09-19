@@ -166,6 +166,12 @@ async def download_generic(
     has_ffmpeg = ffmpeg_bin is not None
     cookie_file = _get_cookiefile(output_dir)
 
+    extractor_args = {
+        "youtube": {
+            "player_client": ["visionos", "web_embedded", "tv_downgraded"]
+        }
+    }
+
     if is_audio_only:
         ydl_opts = {
             "format": "bestaudio/best",
@@ -173,6 +179,7 @@ async def download_generic(
             "writethumbnail": True,
             "quiet": True,
             "no_warnings": True,
+            "extractor_args": extractor_args,
         }
         if has_ffmpeg:
             ydl_opts["ffmpeg_location"] = ffmpeg_bin
@@ -207,6 +214,7 @@ async def download_generic(
                 "quiet": True,
                 "no_warnings": True,
                 "ffmpeg_location": ffmpeg_bin,
+                "extractor_args": extractor_args,
             }
         else:
             # Fallback if ffmpeg is somehow missing
@@ -224,6 +232,7 @@ async def download_generic(
                 "writethumbnail": True,
                 "quiet": True,
                 "no_warnings": True,
+                "extractor_args": extractor_args,
             }
 
     if cookie_file and os.path.exists(cookie_file):

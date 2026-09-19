@@ -155,11 +155,18 @@ async def download_spotify(spotify_url: str, output_dir: str) -> MediaResult:
         except Exception:
             pass
 
+    extractor_args = {
+        "youtube": {
+            "player_client": ["visionos", "web_embedded", "tv_downgraded"]
+        }
+    }
+
     ydl_opts = {
         "format": "bestaudio/best",
         "outtmpl": out_template,
         "quiet": True,
         "no_warnings": True,
+        "extractor_args": extractor_args,
     }
 
     if ffmpeg_bin:
@@ -194,6 +201,12 @@ async def download_spotify(spotify_url: str, output_dir: str) -> MediaResult:
             info = await loop.run_in_executor(None, lambda: _download(fallback_query))
         except Exception as e2:
             last_err = e2
+            logger.warning(f"Secondary YouTube query failed: {e2}. Trying SoundCloud fallback...")
+            try:
+                sc_query = f"scsearch1:{artist} - {title}"
+                info = await loop.run_in_executor(None, lambda: _download(sc_query))
+            except Exception as e3:
+                last_err = e3
 
     # Check for downloaded mp3 files
     mp3_files = [

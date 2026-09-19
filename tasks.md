@@ -15,6 +15,6 @@
 - [x] **Phase 4: Unit Testing & Verification Gates**
   - [x] Write unit tests for Spotify HTML metadata extraction and FFmpeg initialization.
   - [x] Run full test suite with 100% pass rate (20/20 tests passed).
-- [ ] **Phase 5: Deployment & User Handoff**
-  - [ ] Push to GitHub `main` via proxy tunnel.
-  - [ ] Provide user verification instructions with `/status` command.
+- [x] **Phase 5: Deployment & User Handoff**
+  - [x] Push to GitHub `main` via proxy tunnel (`fd0e934`).
+  - [x] Provide user verification instructions with `/status` command.
