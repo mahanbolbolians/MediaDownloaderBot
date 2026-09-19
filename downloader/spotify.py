@@ -102,11 +102,6 @@ async def download_spotify(spotify_url: str, output_dir: str) -> MediaResult:
         }],
         "quiet": True,
         "no_warnings": True,
-        "extractor_args": {
-            "youtube": {
-                "player_client": ["android", "ios", "mweb"]
-            }
-        },
     }
 
     from downloader.generic import get_ffmpeg_path
