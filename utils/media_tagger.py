@@ -11,8 +11,10 @@ logger = logging.getLogger(__name__)
 def generate_video_thumbnail(video_path: str, thumb_path: str) -> str | None:
     """Extract a thumbnail frame from video using ffmpeg."""
     try:
+        from downloader.generic import get_ffmpeg_path
+        ff = get_ffmpeg_path() or "ffmpeg"
         cmd = [
-            "ffmpeg", "-y", "-ss", "00:00:01",
+            ff, "-y", "-ss", "00:00:01",
             "-i", video_path,
             "-vframes", "1",
             "-q:v", "2",

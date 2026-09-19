@@ -19,6 +19,14 @@ import crypto_patch
 import net_patch
 net_patch.apply_net_patch()
 
+# Initialize and ensure self-healing FFmpeg runtime
+from downloader.generic import ensure_ffmpeg, get_js_runtimes_config
+_active_ffmpeg = ensure_ffmpeg()
+if _active_ffmpeg:
+    logging.info(f"[+] FFmpeg verified and active at: {_active_ffmpeg}")
+else:
+    logging.warning("[-] FFmpeg not detected in system or imageio-ffmpeg bundles!")
+
 from config import config
 from downloader import download_media
 from downloader.detector import detect_url
@@ -57,14 +65,16 @@ def is_authorized(user_id: int) -> bool:
 
 @app.on_message(filters.command(["status"]))
 async def status_handler(client: Client, message: Message):
-    from downloader.generic import get_ffmpeg_path
-    ff = get_ffmpeg_path()
+    ff = ensure_ffmpeg()
+    js = get_js_runtimes_config()
+    js_name = list(js.keys())[0] if js else "None"
     status_text = (
         "🤖 **Media Downloader Bot Status**\n\n"
         f"• 🟢 **Online & Ready**: 24/7\n"
         f"• 🎬 **FFmpeg Engine**: `{'Active ✅' if ff else 'Missing ❌'}`\n"
         f"• 📁 **Binary Path**: `{ff or 'None'}`\n"
-        f"• ⚡ **Version**: `v1.3 (Quality Selection Active)`\n"
+        f"• ⚡ **JS Decipher Engine**: `{'Active ✅ (' + js_name + ')' if js else 'Fallback'}`\n"
+        f"• 📦 **Version**: `v1.4 (Multi-Quality & Spotify Engine)`\n"
     )
     await message.reply_text(status_text)
 

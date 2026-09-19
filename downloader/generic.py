@@ -12,36 +12,126 @@ logger = logging.getLogger(__name__)
 # Apply Universal photo & platform patches
 apply_universal_patch()
 
-def get_ffmpeg_path() -> str | None:
-    """Finds or configures ffmpeg binary from system, imageio-ffmpeg, or Nix/Linux paths."""
+import subprocess
+import glob
+import tempfile
+
+def _test_ffmpeg(exe: str) -> bool:
+    """Verifies that the given ffmpeg binary executes properly."""
+    try:
+        res = subprocess.run([exe, "-version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
+        return res.returncode == 0
+    except Exception:
+        return False
+
+def _setup_ffmpeg_env(exe_path: str):
+    """Ensures ffmpeg directory is in PATH and creates /tmp/ffmpeg helper if needed."""
+    bin_dir = os.path.dirname(exe_path)
+    if bin_dir not in os.environ.get("PATH", ""):
+        os.environ["PATH"] = bin_dir + os.pathsep + os.environ.get("PATH", "")
+    os.environ["IMAGEIO_FFMPEG_EXE"] = exe_path
+
+    if os.name != "nt":
+        try:
+            tmp_bin = "/tmp/ffmpeg"
+            if not os.path.exists(tmp_bin):
+                try:
+                    os.symlink(exe_path, tmp_bin)
+                except Exception:
+                    shutil.copy2(exe_path, tmp_bin)
+            try:
+                os.chmod(tmp_bin, 0o755)
+            except Exception:
+                pass
+            if "/tmp" not in os.environ.get("PATH", ""):
+                os.environ["PATH"] = "/tmp" + os.pathsep + os.environ.get("PATH", "")
+        except Exception as e:
+            logger.debug(f"Failed to setup /tmp/ffmpeg: {e}")
+
+def ensure_ffmpeg() -> str | None:
+    """
+    Finds or configures ffmpeg binary from system, imageio-ffmpeg, or Nix/Linux paths.
+    Repairs execute permissions (0o755) and updates PATH.
+    """
+    # 1. System PATH check
     sys_ffmpeg = shutil.which("ffmpeg")
-    if sys_ffmpeg:
+    if sys_ffmpeg and _test_ffmpeg(sys_ffmpeg):
+        _setup_ffmpeg_env(sys_ffmpeg)
         return sys_ffmpeg
 
+    # 2. Check imageio_ffmpeg bundled binaries directly before get_ffmpeg_exe caches None
     try:
         import imageio_ffmpeg
-        exe = imageio_ffmpeg.get_ffmpeg_exe()
-        if exe and os.path.exists(exe):
-            bin_dir = os.path.dirname(exe)
-            if bin_dir not in os.environ.get("PATH", ""):
-                os.environ["PATH"] = bin_dir + os.pathsep + os.environ.get("PATH", "")
-            return exe
-    except Exception as e:
-        logger.debug(f"imageio_ffmpeg check failed: {e}")
+        bin_dir = os.path.join(os.path.dirname(imageio_ffmpeg.__file__), "binaries")
+        if os.path.isdir(bin_dir):
+            for fname in os.listdir(bin_dir):
+                if fname.startswith("ffmpeg"):
+                    candidate = os.path.join(bin_dir, fname)
+                    if os.path.isfile(candidate):
+                        try:
+                            os.chmod(candidate, 0o755)
+                        except Exception:
+                            pass
+                        if _test_ffmpeg(candidate):
+                            _setup_ffmpeg_env(candidate)
+                            return candidate
 
-    for c in (
+        # Fallback to imageio_ffmpeg.get_ffmpeg_exe()
+        exe = imageio_ffmpeg.get_ffmpeg_exe()
+        if exe and os.path.isfile(exe):
+            try:
+                os.chmod(exe, 0o755)
+            except Exception:
+                pass
+            if _test_ffmpeg(exe):
+                _setup_ffmpeg_env(exe)
+                return exe
+    except Exception as e:
+        logger.debug(f"imageio_ffmpeg inspection failed: {e}")
+
+    # 3. Nix profiles and Nix store scanning
+    nix_candidates = [
         "/root/.nix-profile/bin/ffmpeg",
         "/nix/var/nix/profiles/default/bin/ffmpeg",
+        os.path.expanduser("~/.nix-profile/bin/ffmpeg"),
         "/usr/bin/ffmpeg",
         "/usr/local/bin/ffmpeg",
-        os.path.expanduser("~/.nix-profile/bin/ffmpeg"),
-    ):
-        if os.path.exists(c):
-            bin_dir = os.path.dirname(c)
-            if bin_dir not in os.environ.get("PATH", ""):
-                os.environ["PATH"] = bin_dir + os.pathsep + os.environ.get("PATH", "")
-            return c
+    ]
+    nix_candidates.extend(glob.glob("/nix/store/*ffmpeg*/bin/ffmpeg"))
+    nix_candidates.extend(glob.glob("/root/.nix-profile/**/ffmpeg", recursive=True))
 
+    for c in nix_candidates:
+        if os.path.isfile(c):
+            try:
+                os.chmod(c, 0o755)
+            except Exception:
+                pass
+            if _test_ffmpeg(c):
+                _setup_ffmpeg_env(c)
+                return c
+
+    return None
+
+def get_ffmpeg_path() -> str | None:
+    return ensure_ffmpeg()
+
+def get_js_runtimes_config() -> dict | None:
+    """Finds available JS runtimes (node/deno) for yt-dlp to decipher YouTube signatures."""
+    if shutil.which("node"):
+        return {"node": {}}
+    if shutil.which("deno"):
+        return {"deno": {}}
+    for c in [
+        "/root/.nix-profile/bin/node",
+        "/usr/bin/node",
+        "/usr/local/bin/node",
+        os.path.expanduser("~/.nix-profile/bin/node"),
+    ]:
+        if os.path.isfile(c):
+            return {"node": {"path": c}}
+    for c in glob.glob("/nix/store/*nodejs*/bin/node"):
+        if os.path.isfile(c):
+            return {"node": {"path": c}}
     return None
 
 def _get_cookiefile(output_dir: str) -> str | None:
@@ -138,6 +228,10 @@ async def download_generic(
 
     if cookie_file and os.path.exists(cookie_file):
         ydl_opts["cookiefile"] = cookie_file
+
+    js_cfg = get_js_runtimes_config()
+    if js_cfg:
+        ydl_opts["js_runtimes"] = js_cfg
 
     loop = asyncio.get_running_loop()
 
