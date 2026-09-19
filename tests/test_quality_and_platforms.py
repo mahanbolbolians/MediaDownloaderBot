@@ -1,6 +1,7 @@
 import unittest
 import yt_dlp
 from downloader.universal_patch import apply_universal_patch, populate_photo_formats
+from downloader.generic import get_ffmpeg_path
 from yt_dlp.extractor.pinterest import PinterestIE
 from yt_dlp.extractor.instagram import InstagramIE
 
@@ -8,6 +9,10 @@ class TestUniversalPatchesAndQuality(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         apply_universal_patch()
+
+    def test_ffmpeg_detection(self):
+        path = get_ffmpeg_path()
+        self.assertIsNotNone(path, "FFmpeg should be detected via system or imageio-ffmpeg")
 
     def test_pinterest_image_pin_extraction(self):
         pin_data = {
@@ -42,18 +47,65 @@ class TestUniversalPatchesAndQuality(unittest.TestCase):
         self.assertEqual(formats[0]["url"], "https://example.com/thumb_large.jpg")
         self.assertEqual(formats[0]["width"], 1200)
 
-    def test_quality_format_selectors(self):
-        for q in [1080, 720, 480, 360]:
+    def test_landscape_quality_selection(self):
+        landscape_formats = [
+            {"format_id": "140", "url": "https://a.m4a", "ext": "m4a", "acodec": "aac", "vcodec": "none", "abr": 128},
+            {"format_id": "18", "url": "https://360.mp4", "ext": "mp4", "height": 360, "width": 640, "acodec": "aac", "vcodec": "avc1"},
+            {"format_id": "135", "url": "https://480.mp4", "ext": "mp4", "height": 480, "width": 854, "acodec": "none", "vcodec": "avc1"},
+            {"format_id": "136", "url": "https://720.mp4", "ext": "mp4", "height": 720, "width": 1280, "acodec": "none", "vcodec": "avc1"},
+            {"format_id": "137", "url": "https://1080.mp4", "ext": "mp4", "height": 1080, "width": 1920, "acodec": "none", "vcodec": "avc1"},
+        ]
+        info = {"id": "land", "title": "Landscape", "extractor": "youtube", "formats": landscape_formats}
+
+        expected = {1080: 1080, 720: 720, 480: 480, 360: 360}
+        for q, exp_h in expected.items():
             spec = (
-                f"bestvideo[height<={q}][ext=mp4]+bestaudio[ext=m4a]/"
+                f"bestvideo[height={q}]+bestaudio/"
+                f"bestvideo[width={q}]+bestaudio/"
+                f"best[height={q}]/"
+                f"best[width={q}]/"
                 f"bestvideo[height<={q}]+bestaudio/"
-                f"best[height<={q}][ext=mp4]/"
+                f"bestvideo[width<={q}]+bestaudio/"
                 f"best[height<={q}]/"
-                f"best/photo"
+                f"best[width<={q}]/"
+                f"bestvideo+bestaudio/best/photo"
             )
             ydl = yt_dlp.YoutubeDL({"format": spec})
+            fmts = ydl._get_formats(info)
             sel = ydl.build_format_selector(spec)
-            self.assertIsNotNone(sel)
+            chosen = ydl._select_formats(fmts, sel)
+            self.assertTrue(len(chosen) > 0)
+            self.assertEqual(chosen[0].get("height"), exp_h, f"Quality {q} should select height {exp_h}")
+
+    def test_portrait_quality_selection(self):
+        portrait_formats = [
+            {"format_id": "140", "url": "https://a.m4a", "ext": "m4a", "acodec": "aac", "vcodec": "none", "abr": 128},
+            {"format_id": "v360", "url": "https://v360.mp4", "ext": "mp4", "height": 640, "width": 360, "acodec": "none", "vcodec": "avc1"},
+            {"format_id": "v480", "url": "https://v480.mp4", "ext": "mp4", "height": 854, "width": 480, "acodec": "none", "vcodec": "avc1"},
+            {"format_id": "v720", "url": "https://v720.mp4", "ext": "mp4", "height": 1280, "width": 720, "acodec": "none", "vcodec": "avc1"},
+            {"format_id": "v1080", "url": "https://v1080.mp4", "ext": "mp4", "height": 1920, "width": 1080, "acodec": "none", "vcodec": "avc1"},
+        ]
+        info = {"id": "port", "title": "Portrait", "extractor": "youtube", "formats": portrait_formats}
+
+        expected = {1080: 1080, 720: 720, 480: 480, 360: 360}
+        for q, exp_w in expected.items():
+            spec = (
+                f"bestvideo[height={q}]+bestaudio/"
+                f"bestvideo[width={q}]+bestaudio/"
+                f"best[height={q}]/"
+                f"best[width={q}]/"
+                f"bestvideo[height<={q}]+bestaudio/"
+                f"bestvideo[width<={q}]+bestaudio/"
+                f"best[height<={q}]/"
+                f"best[width<={q}]/"
+                f"bestvideo+bestaudio/best/photo"
+            )
+            ydl = yt_dlp.YoutubeDL({"format": spec})
+            fmts = ydl._get_formats(info)
+            sel = ydl.build_format_selector(spec)
+            chosen = ydl._select_formats(fmts, sel)
+            self.assertTrue(len(chosen) > 0)
+            self.assertEqual(chosen[0].get("width"), exp_w, f"Quality {q} should select width {exp_w}")
 
 if __name__ == "__main__":
     unittest.main()

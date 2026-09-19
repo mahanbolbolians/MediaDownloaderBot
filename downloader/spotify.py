@@ -108,6 +108,12 @@ async def download_spotify(spotify_url: str, output_dir: str) -> MediaResult:
             }
         },
     }
+
+    from downloader.generic import get_ffmpeg_path
+    ffmpeg_bin = get_ffmpeg_path()
+    if ffmpeg_bin:
+        ydl_opts["ffmpeg_location"] = ffmpeg_bin
+
     if cookie_file and os.path.exists(cookie_file):
         ydl_opts["cookiefile"] = cookie_file
 

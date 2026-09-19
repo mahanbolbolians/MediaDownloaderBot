@@ -12,11 +12,43 @@ logger = logging.getLogger(__name__)
 # Apply Universal photo & platform patches
 apply_universal_patch()
 
+def get_ffmpeg_path() -> str | None:
+    """Finds or configures ffmpeg binary from system, imageio-ffmpeg, or Nix/Linux paths."""
+    sys_ffmpeg = shutil.which("ffmpeg")
+    if sys_ffmpeg:
+        return sys_ffmpeg
+
+    try:
+        import imageio_ffmpeg
+        exe = imageio_ffmpeg.get_ffmpeg_exe()
+        if exe and os.path.exists(exe):
+            bin_dir = os.path.dirname(exe)
+            if bin_dir not in os.environ.get("PATH", ""):
+                os.environ["PATH"] = bin_dir + os.pathsep + os.environ.get("PATH", "")
+            return exe
+    except Exception as e:
+        logger.debug(f"imageio_ffmpeg check failed: {e}")
+
+    for c in (
+        "/root/.nix-profile/bin/ffmpeg",
+        "/nix/var/nix/profiles/default/bin/ffmpeg",
+        "/usr/bin/ffmpeg",
+        "/usr/local/bin/ffmpeg",
+        os.path.expanduser("~/.nix-profile/bin/ffmpeg"),
+    ):
+        if os.path.exists(c):
+            bin_dir = os.path.dirname(c)
+            if bin_dir not in os.environ.get("PATH", ""):
+                os.environ["PATH"] = bin_dir + os.pathsep + os.environ.get("PATH", "")
+            return c
+
+    return None
+
 def _get_cookiefile(output_dir: str) -> str | None:
     """Check for local cookies.txt or YOUTUBE_COOKIES environment variable."""
     if os.path.exists("cookies.txt"):
         return os.path.abspath("cookies.txt")
-    
+
     cookies_env = os.environ.get("YOUTUBE_COOKIES")
     if cookies_env:
         cookie_path = os.path.join(output_dir, "cookies.txt")
@@ -40,7 +72,8 @@ async def download_generic(
     os.makedirs(output_dir, exist_ok=True)
     out_template = os.path.join(output_dir, "%(title).50s_%(id)s.%(ext)s")
 
-    has_ffmpeg = shutil.which("ffmpeg") is not None
+    ffmpeg_bin = get_ffmpeg_path()
+    has_ffmpeg = ffmpeg_bin is not None
     cookie_file = _get_cookiefile(output_dir)
 
     extractor_args = {
@@ -59,6 +92,7 @@ async def download_generic(
             "extractor_args": extractor_args,
         }
         if has_ffmpeg:
+            ydl_opts["ffmpeg_location"] = ffmpeg_bin
             ydl_opts["postprocessors"] = [{
                 "key": "FFmpegExtractAudio",
                 "preferredcodec": "mp3",
@@ -67,12 +101,20 @@ async def download_generic(
     else:
         max_q = target_quality or 1080
         if has_ffmpeg:
+            # Match exact target resolution first (both landscape height and portrait width),
+            # then closest resolution under target, then best available.
             format_selector = (
-                f"bestvideo[height<={max_q}][ext=mp4]+bestaudio[ext=m4a]/"
+                f"bestvideo[height={max_q}]+bestaudio/"
+                f"bestvideo[width={max_q}]+bestaudio/"
+                f"best[height={max_q}]/"
+                f"best[width={max_q}]/"
                 f"bestvideo[height<={max_q}]+bestaudio/"
-                f"best[height<={max_q}][ext=mp4]/"
+                f"bestvideo[width<={max_q}]+bestaudio/"
                 f"best[height<={max_q}]/"
-                f"best/photo"
+                f"best[width<={max_q}]/"
+                f"bestvideo+bestaudio/"
+                f"best/"
+                f"photo"
             )
             ydl_opts = {
                 "format": format_selector,
@@ -82,9 +124,18 @@ async def download_generic(
                 "quiet": True,
                 "no_warnings": True,
                 "extractor_args": extractor_args,
+                "ffmpeg_location": ffmpeg_bin,
             }
         else:
-            format_selector = f"best[height<={max_q}][ext=mp4]/best[height<={max_q}]/best/photo"
+            # Fallback if ffmpeg is somehow missing
+            logger.warning("FFmpeg not detected! Video resolutions above 360p require FFmpeg to merge streams.")
+            format_selector = (
+                f"best[height={max_q}]/"
+                f"best[width={max_q}]/"
+                f"best[height<={max_q}]/"
+                f"best[width<={max_q}]/"
+                f"best/photo"
+            )
             ydl_opts = {
                 "format": format_selector,
                 "outtmpl": out_template,
