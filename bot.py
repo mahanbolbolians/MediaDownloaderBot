@@ -74,7 +74,7 @@ async def status_handler(client: Client, message: Message):
         f"• 🎬 **FFmpeg Engine**: `{'Active ✅' if ff else 'Missing ❌'}`\n"
         f"• 📁 **Binary Path**: `{ff or 'None'}`\n"
         f"• ⚡ **JS Decipher Engine**: `{'Active ✅ (' + js_name + ')' if js else 'Fallback'}`\n"
-        f"• 📦 **Version**: `v1.4 (Multi-Quality & Spotify Engine)`\n"
+        f"• 📦 **Version**: `v1.5 (InnerTube High-Speed Engine)`\n"
     )
     await message.reply_text(status_text)
 

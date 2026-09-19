@@ -106,6 +106,68 @@ def parse_spotify_html(html: str) -> dict:
 
     return meta
 
+def get_itunes_metadata(title: str, artist: str = "") -> dict:
+    """
+    Fetches rich song metadata (artist, album, 1000x1000 artwork, duration)
+    from Apple's iTunes Search API as a 100% free, unblocked fallback.
+    """
+    query = f"{artist} {title}".strip() if artist and artist != "Unknown Artist" else title
+    url = f"https://itunes.apple.com/search?term={urllib.parse.quote(query)}&entity=song&limit=1"
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    try:
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            if data.get("results"):
+                item = data["results"][0]
+                art = item.get("artworkUrl100")
+                if art:
+                    art = art.replace("100x100bb.jpg", "1000x1000bb.jpg")
+                return {
+                    "title": item.get("trackName") or title,
+                    "artist": item.get("artistName") or artist,
+                    "album": item.get("collectionName"),
+                    "thumbnail_url": art,
+                    "duration": int(item.get("trackTimeMillis", 0) / 1000)
+                }
+    except Exception as e:
+        logger.debug(f"iTunes metadata lookup failed: {e}")
+    return {}
+
+def search_youtube_music(query: str) -> str | None:
+    """
+    Directly queries YouTube Music's InnerTube API (WEB_REMIX client)
+    to find the official videoId for a song query.
+    Bypasses datacenter bot blocks without login or cookies.
+    """
+    url = "https://music.youtube.com/youtubei/v1/search?prettyPrint=false"
+    data = {
+        "context": {
+            "client": {
+                "clientName": "WEB_REMIX",
+                "clientVersion": "1.20240101.01.00",
+                "hl": "en",
+                "gl": "US"
+            }
+        },
+        "query": query
+    }
+    headers = {
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Origin": "https://music.youtube.com",
+        "Referer": "https://music.youtube.com/",
+    }
+    try:
+        req = urllib.request.Request(url, data=json.dumps(data).encode("utf-8"), headers=headers)
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            raw = resp.read().decode("utf-8", errors="ignore")
+            match = re.search(r'"videoId":\s*"([a-zA-Z0-9_-]{11})"', raw)
+            if match:
+                return match.group(1)
+    except Exception as e:
+        logger.warning(f"InnerTube YouTube Music search failed for '{query}': {e}")
+    return None
+
 async def get_spotify_metadata(spotify_url: str) -> dict:
     """Extract metadata (title, artist, thumbnail) from Spotify URL using multi-tier fallback."""
     clean_url = spotify_url.split("?")[0].strip()
@@ -171,11 +233,24 @@ async def get_spotify_metadata(spotify_url: str) -> dict:
             if not meta["thumbnail_url"] and "thumbnail_url" in oembed_data:
                 meta["thumbnail_url"] = oembed_data["thumbnail_url"]
 
+    # Tier 4: Apple iTunes Search API enrichment
+    if meta["title"] != "Unknown Title":
+        itunes_meta = await loop.run_in_executor(None, lambda: get_itunes_metadata(meta["title"], meta["artist"]))
+        if itunes_meta:
+            if meta["artist"] == "Unknown Artist" and itunes_meta.get("artist"):
+                meta["artist"] = itunes_meta["artist"]
+            if not meta["thumbnail_url"] and itunes_meta.get("thumbnail_url"):
+                meta["thumbnail_url"] = itunes_meta["thumbnail_url"]
+            if not meta.get("duration") and itunes_meta.get("duration"):
+                meta["duration"] = itunes_meta["duration"]
+            if itunes_meta.get("album"):
+                meta["album"] = itunes_meta["album"]
+
     return meta
 
 async def download_spotify(spotify_url: str, output_dir: str) -> MediaResult:
     """
-    Downloads Spotify track by matching metadata with YouTube/SoundCloud
+    Downloads Spotify track by matching metadata with YouTube Music/SoundCloud
     and tagging the resulting 320kbps MP3 with ID3 tags and album cover art.
     """
     os.makedirs(output_dir, exist_ok=True)
@@ -183,6 +258,7 @@ async def download_spotify(spotify_url: str, output_dir: str) -> MediaResult:
 
     title = meta["title"]
     artist = meta["artist"]
+    album = meta.get("album", "")
     thumb_url = meta["thumbnail_url"]
     expected_duration = meta.get("duration", 0)
 
@@ -236,9 +312,9 @@ async def download_spotify(spotify_url: str, output_dir: str) -> MediaResult:
 
     loop = asyncio.get_running_loop()
 
-    def _download(query: str):
+    def _download(target: str):
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            return ydl.extract_info(query, download=True)
+            return ydl.extract_info(target, download=True)
 
     def _has_audio(d: str) -> bool:
         return any(
@@ -246,26 +322,36 @@ async def download_spotify(spotify_url: str, output_dir: str) -> MediaResult:
             for f in os.listdir(d)
         )
 
-    # Search candidates: YouTube direct -> YouTube with audio -> SoundCloud fallback
-    search_queries = [
-        f"ytsearch1:{artist} - {title}",
-        f"ytsearch1:{artist} - {title} audio",
-        f"scsearch1:{artist} - {title}",
-    ]
+    # Strategy 1: High-Speed InnerTube YouTube Music direct video lookup
+    # Bypasses datacenter bot challenge by converting query into direct YouTube video URL
+    search_candidates = []
+    search_query = f"{artist} {title}".strip() if artist != "Unknown Artist" else title
+    logger.info(f"Resolving YouTube Music direct stream for: {search_query}")
+    
+    ytm_video_id = await loop.run_in_executor(None, lambda: search_youtube_music(search_query))
+    if ytm_video_id:
+        logger.info(f"Found YouTube Music videoId: {ytm_video_id}")
+        search_candidates.append(f"https://www.youtube.com/watch?v={ytm_video_id}")
+
+    # Strategy 2: SoundCloud Search fallback
+    search_candidates.append(f"scsearch1:{search_query}")
+
+    # Strategy 3: Standard ytsearch fallback
+    search_candidates.append(f"ytsearch1:{search_query}")
 
     info = None
     last_err = None
-    for q in search_queries:
-        logger.info(f"Searching audio for Spotify track: {q}")
+    for target in search_candidates:
+        logger.info(f"Attempting Spotify audio download via: {target}")
         try:
-            cur_info = await loop.run_in_executor(None, lambda: _download(q))
+            cur_info = await loop.run_in_executor(None, lambda t=target: _download(t))
             if _has_audio(output_dir):
                 info = cur_info
-                logger.info(f"Successfully downloaded audio stream via: {q}")
+                logger.info(f"Successfully downloaded audio stream via: {target}")
                 break
         except Exception as e:
             last_err = e
-            logger.warning(f"Audio search '{q}' failed: {e}")
+            logger.warning(f"Audio target '{target}' failed: {e}")
 
     # Check for downloaded mp3 files
     mp3_files = [
@@ -294,15 +380,17 @@ async def download_spotify(spotify_url: str, output_dir: str) -> MediaResult:
                     pass
 
     if not mp3_files:
-        err_msg = f": {last_err}" if last_err else ""
+        err_msg = f": {last_err}" if last_err else f" (no audio found for '{artist} - {title}')"
         raise RuntimeError(f"Spotify audio download failed{err_msg}")
 
     main_file = mp3_files[0]
     duration = expected_duration
     if info and "entries" in info and info["entries"]:
         duration = int(info["entries"][0].get("duration") or duration)
+    elif info and "duration" in info and info["duration"]:
+        duration = int(info["duration"])
 
-    # Download Spotify high-res cover art
+    # Download high-res cover art
     cover_path = os.path.join(output_dir, "cover.jpg")
     if thumb_url:
         def _get_cover():
@@ -314,7 +402,13 @@ async def download_spotify(spotify_url: str, output_dir: str) -> MediaResult:
         await loop.run_in_executor(None, _get_cover)
 
     # Embed ID3 Tags & Album Cover
-    tag_mp3(main_file, title=title, artist=artist, cover_path=cover_path if os.path.exists(cover_path) else None)
+    tag_mp3(
+        main_file,
+        title=title,
+        artist=artist,
+        album=album,
+        cover_path=cover_path if os.path.exists(cover_path) else None
+    )
 
     return MediaResult(
         media_type="audio",
@@ -323,5 +417,5 @@ async def download_spotify(spotify_url: str, output_dir: str) -> MediaResult:
         artist=artist,
         duration=duration,
         thumbnail_path=cover_path if os.path.exists(cover_path) else None,
-        caption=f"🎧 **{title}**\n👤 `{artist}`\n🟢 *Source: Spotify*"
+        caption=f"🎵 **{artist} - {title}**\n✨ High-Quality 320kbps MP3"
     )

@@ -1,5 +1,5 @@
 import unittest
-from downloader.spotify import parse_spotify_html
+from downloader.spotify import parse_spotify_html, get_itunes_metadata, search_youtube_music
 from downloader.generic import ensure_ffmpeg, get_js_runtimes_config
 
 class TestSpotifyAndFFmpeg(unittest.TestCase):
@@ -78,6 +78,10 @@ class TestSpotifyAndFFmpeg(unittest.TestCase):
         <body></body>
         </html>
         """
+        meta = parse_spotify_html(html)
+        self.assertEqual(meta["title"], "Blinding Lights")
+        self.assertEqual(meta["artist"], "The Weeknd")
+
     def test_spotify_embed_json_parsing(self):
         html = """
         <!DOCTYPE html>
