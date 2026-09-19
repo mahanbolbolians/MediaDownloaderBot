@@ -78,9 +78,43 @@ class TestSpotifyAndFFmpeg(unittest.TestCase):
         <body></body>
         </html>
         """
+    def test_spotify_embed_json_parsing(self):
+        html = """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <script id="__NEXT_DATA__" type="application/json">
+            {
+                "props": {
+                    "pageProps": {
+                        "state": {
+                            "data": {
+                                "entity": {
+                                    "title": "New Person, Same Old Mistakes",
+                                    "artists": [{"name": "Tame Impala"}],
+                                    "duration": 363240,
+                                    "visualIdentity": {
+                                        "image": [
+                                            {"url": "https://image-cdn.spotify.com/small.jpg", "width": 300},
+                                            {"url": "https://image-cdn.spotify.com/large.jpg", "width": 640}
+                                        ]
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            </script>
+        </head>
+        <body></body>
+        </html>
+        """
         meta = parse_spotify_html(html)
-        self.assertEqual(meta["title"], "Blinding Lights")
-        self.assertEqual(meta["artist"], "The Weeknd")
+        self.assertEqual(meta["title"], "New Person, Same Old Mistakes")
+        self.assertEqual(meta["artist"], "Tame Impala")
+        self.assertEqual(meta["thumbnail_url"], "https://image-cdn.spotify.com/large.jpg")
+        self.assertEqual(meta["duration"], 363)
 
 if __name__ == "__main__":
     unittest.main()

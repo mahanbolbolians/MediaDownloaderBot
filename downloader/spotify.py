@@ -14,94 +14,145 @@ from utils.media_tagger import tag_mp3
 logger = logging.getLogger(__name__)
 
 def parse_spotify_html(html: str) -> dict:
-    """Extracts title, artist, and cover thumbnail from Spotify HTML."""
-    title = None
-    artist = None
-    cover_url = None
+    """Extracts title, artist, and cover thumbnail from Spotify HTML or embed page."""
+    meta = {
+        "title": "Unknown Title",
+        "artist": "Unknown Artist",
+        "thumbnail_url": None,
+        "duration": 0
+    }
 
-    # 1. OpenGraph / Twitter meta tags
+    # 1. Try __NEXT_DATA__ JSON from Embed page
+    m_json = re.search(r'<script\s+id="__NEXT_DATA__"\s+type="application/json">([^<]+)</script>', html, re.IGNORECASE)
+    if m_json:
+        try:
+            data = json.loads(m_json.group(1))
+            entity = data.get("props", {}).get("pageProps", {}).get("state", {}).get("data", {}).get("entity", {})
+            if entity:
+                meta["title"] = entity.get("name") or entity.get("title") or meta["title"]
+                artists = entity.get("artists", [])
+                if artists:
+                    meta["artist"] = ", ".join(a["name"] for a in artists if "name" in a)
+                elif "subtitle" in entity:
+                    meta["artist"] = entity["subtitle"]
+
+                images = entity.get("visualIdentity", {}).get("image", [])
+                if images:
+                    meta["thumbnail_url"] = images[-1].get("url")
+
+                dur = entity.get("duration", 0)
+                if dur:
+                    meta["duration"] = int(dur / 1000)
+
+                if meta["title"] != "Unknown Title" and meta["artist"] != "Unknown Artist":
+                    return meta
+        except Exception as e:
+            logger.debug(f"__NEXT_DATA__ parse failed: {e}")
+
+    # 2. OpenGraph / Twitter meta tags
     m_title = re.search(r'<meta\s+name="twitter:title"\s+content="([^"]+)"', html, re.IGNORECASE) or \
               re.search(r'<meta\s+property="og:title"\s+content="([^"]+)"', html, re.IGNORECASE)
     if m_title:
-        title = m_title.group(1).strip()
+        meta["title"] = m_title.group(1).strip()
 
     m_artist = re.search(r'<meta\s+name="music:musician_description"\s+content="([^"]+)"', html, re.IGNORECASE) or \
                re.search(r'<meta\s+name="twitter:audio:artist_name"\s+content="([^"]+)"', html, re.IGNORECASE)
     if m_artist:
-        artist = m_artist.group(1).strip()
+        meta["artist"] = m_artist.group(1).strip()
 
-    if not artist:
+    if meta["artist"] == "Unknown Artist":
         m_desc = re.search(r'<meta\s+name="twitter:description"\s+content="([^"]+)"', html, re.IGNORECASE) or \
                  re.search(r'<meta\s+property="og:description"\s+content="([^"]+)"', html, re.IGNORECASE)
         if m_desc:
             parts = m_desc.group(1).split("·")
             if parts and parts[0].strip():
-                artist = parts[0].strip()
+                meta["artist"] = parts[0].strip()
 
     m_img = re.search(r'<meta\s+property="og:image"\s+content="([^"]+)"', html, re.IGNORECASE) or \
             re.search(r'<meta\s+name="twitter:image"\s+content="([^"]+)"', html, re.IGNORECASE)
-    if m_img:
-        cover_url = m_img.group(1).strip()
+    if m_img and not meta["thumbnail_url"]:
+        meta["thumbnail_url"] = m_img.group(1).strip()
 
-    # 2. JSON-LD fallback
-    if not title or not artist:
+    # 3. JSON-LD fallback
+    if meta["title"] == "Unknown Title" or meta["artist"] == "Unknown Artist":
         m_ld = re.search(r'<script\s+type="application/ld\+json">([^<]+)</script>', html, re.IGNORECASE)
         if m_ld:
             try:
-                data = json.loads(m_ld.group(1))
-                if not title:
-                    title = data.get("name")
-                if not artist and "byArtist" in data and isinstance(data["byArtist"], list) and data["byArtist"]:
-                    artist = data["byArtist"][0].get("name")
-                if not cover_url and "image" in data and isinstance(data["image"], str):
-                    cover_url = data["image"]
+                ld_data = json.loads(m_ld.group(1))
+                if meta["title"] == "Unknown Title":
+                    meta["title"] = ld_data.get("name", meta["title"])
+                if meta["artist"] == "Unknown Artist" and "byArtist" in ld_data and isinstance(ld_data["byArtist"], list) and ld_data["byArtist"]:
+                    meta["artist"] = ld_data["byArtist"][0].get("name", meta["artist"])
+                if not meta["thumbnail_url"] and "image" in ld_data and isinstance(ld_data["image"], str):
+                    meta["thumbnail_url"] = ld_data["image"]
             except Exception:
                 pass
 
-    # 3. HTML <title> tag fallback
-    if not title or not artist:
+    # 4. HTML <title> tag fallback
+    if meta["title"] == "Unknown Title" or meta["artist"] == "Unknown Artist":
         m_pt = re.search(r'<title>(.*?)</title>', html, re.IGNORECASE | re.DOTALL)
         if m_pt:
             t = m_pt.group(1).strip()
             match = re.match(r'^(.*?)\s*-\s*song and lyrics by\s*(.*?)\s*\|\s*Spotify', t, re.IGNORECASE)
             if match:
-                if not title:
-                    title = match.group(1).strip()
-                if not artist:
-                    artist = match.group(2).strip()
+                if meta["title"] == "Unknown Title":
+                    meta["title"] = match.group(1).strip()
+                if meta["artist"] == "Unknown Artist":
+                    meta["artist"] = match.group(2).strip()
             else:
                 simple_match = re.match(r'^(.*?)\s*\|\s*Spotify', t, re.IGNORECASE)
-                if simple_match and not title:
-                    title = simple_match.group(1).strip()
+                if simple_match and meta["title"] == "Unknown Title":
+                    meta["title"] = simple_match.group(1).strip()
 
-    return {
-        "title": title or "Unknown Title",
-        "artist": artist or "Unknown Artist",
-        "thumbnail_url": cover_url
-    }
+    return meta
 
 async def get_spotify_metadata(spotify_url: str) -> dict:
     """Extract metadata (title, artist, thumbnail) from Spotify URL using multi-tier fallback."""
     clean_url = spotify_url.split("?")[0].strip()
+    m_id = re.search(r"/(track|album|playlist)/([a-zA-Z0-9]+)", clean_url)
     loop = asyncio.get_running_loop()
 
-    # Tier 1: HTML Scrape
+    # Tier 1: Embed Page (most reliable, unblocked, contains __NEXT_DATA__ JSON)
+    if m_id:
+        media_type = m_id.group(1)
+        media_id = m_id.group(2)
+        embed_url = f"https://open.spotify.com/embed/{media_type}/{media_id}"
+
+        def _fetch_embed():
+            try:
+                req = urllib.request.Request(
+                    embed_url,
+                    headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+                )
+                with urllib.request.urlopen(req, timeout=12) as resp:
+                    return resp.read().decode("utf-8", errors="ignore")
+            except Exception as e:
+                logger.warning(f"Spotify embed fetch failed for {embed_url}: {e}")
+                return None
+
+        embed_html = await loop.run_in_executor(None, _fetch_embed)
+        if embed_html:
+            meta = parse_spotify_html(embed_html)
+            if meta["title"] != "Unknown Title" and meta["artist"] != "Unknown Artist":
+                return meta
+
+    # Tier 2: Standard Track HTML Page
     def _fetch_html():
         try:
             req = urllib.request.Request(
                 clean_url,
                 headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
             )
-            with urllib.request.urlopen(req, timeout=10) as resp:
+            with urllib.request.urlopen(req, timeout=12) as resp:
                 return resp.read().decode("utf-8", errors="ignore")
         except Exception as e:
             logger.warning(f"Spotify HTML fetch error for {clean_url}: {e}")
             return None
 
     html = await loop.run_in_executor(None, _fetch_html)
-    meta = parse_spotify_html(html) if html else {"title": "Unknown Title", "artist": "Unknown Artist", "thumbnail_url": None}
+    meta = parse_spotify_html(html) if html else {"title": "Unknown Title", "artist": "Unknown Artist", "thumbnail_url": None, "duration": 0}
 
-    # Tier 2: OEmbed Fallback if title or artist is unknown
+    # Tier 3: OEmbed Fallback
     if meta["title"] == "Unknown Title" or meta["artist"] == "Unknown Artist":
         def _fetch_oembed():
             try:
@@ -124,7 +175,7 @@ async def get_spotify_metadata(spotify_url: str) -> dict:
 
 async def download_spotify(spotify_url: str, output_dir: str) -> MediaResult:
     """
-    Downloads Spotify track by matching metadata with YouTube/YouTube Music
+    Downloads Spotify track by matching metadata with YouTube/SoundCloud
     and tagging the resulting 320kbps MP3 with ID3 tags and album cover art.
     """
     os.makedirs(output_dir, exist_ok=True)
@@ -133,11 +184,11 @@ async def download_spotify(spotify_url: str, output_dir: str) -> MediaResult:
     title = meta["title"]
     artist = meta["artist"]
     thumb_url = meta["thumbnail_url"]
+    expected_duration = meta.get("duration", 0)
 
     if title == "Unknown Title" and artist == "Unknown Artist":
         raise RuntimeError("Unable to extract song metadata from Spotify URL.")
 
-    search_query = f"ytsearch1:{artist} - {title} audio"
     out_template = os.path.join(output_dir, f"{artist} - {title}.%(ext)s")
 
     ffmpeg_bin = ensure_ffmpeg()
@@ -189,24 +240,32 @@ async def download_spotify(spotify_url: str, output_dir: str) -> MediaResult:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             return ydl.extract_info(query, download=True)
 
+    def _has_audio(d: str) -> bool:
+        return any(
+            f.lower().endswith((".mp3", ".m4a", ".webm", ".opus", ".ogg", ".aac"))
+            for f in os.listdir(d)
+        )
+
+    # Search candidates: YouTube direct -> YouTube with audio -> SoundCloud fallback
+    search_queries = [
+        f"ytsearch1:{artist} - {title}",
+        f"ytsearch1:{artist} - {title} audio",
+        f"scsearch1:{artist} - {title}",
+    ]
+
     info = None
     last_err = None
-    try:
-        info = await loop.run_in_executor(None, lambda: _download(search_query))
-    except Exception as e:
-        last_err = e
-        logger.warning(f"Primary Spotify query failed: {e}. Trying secondary search without 'audio'...")
+    for q in search_queries:
+        logger.info(f"Searching audio for Spotify track: {q}")
         try:
-            fallback_query = f"ytsearch1:{artist} - {title}"
-            info = await loop.run_in_executor(None, lambda: _download(fallback_query))
-        except Exception as e2:
-            last_err = e2
-            logger.warning(f"Secondary YouTube query failed: {e2}. Trying SoundCloud fallback...")
-            try:
-                sc_query = f"scsearch1:{artist} - {title}"
-                info = await loop.run_in_executor(None, lambda: _download(sc_query))
-            except Exception as e3:
-                last_err = e3
+            cur_info = await loop.run_in_executor(None, lambda: _download(q))
+            if _has_audio(output_dir):
+                info = cur_info
+                logger.info(f"Successfully downloaded audio stream via: {q}")
+                break
+        except Exception as e:
+            last_err = e
+            logger.warning(f"Audio search '{q}' failed: {e}")
 
     # Check for downloaded mp3 files
     mp3_files = [
@@ -239,9 +298,9 @@ async def download_spotify(spotify_url: str, output_dir: str) -> MediaResult:
         raise RuntimeError(f"Spotify audio download failed{err_msg}")
 
     main_file = mp3_files[0]
-    duration = 0
+    duration = expected_duration
     if info and "entries" in info and info["entries"]:
-        duration = int(info["entries"][0].get("duration") or 0)
+        duration = int(info["entries"][0].get("duration") or duration)
 
     # Download Spotify high-res cover art
     cover_path = os.path.join(output_dir, "cover.jpg")
