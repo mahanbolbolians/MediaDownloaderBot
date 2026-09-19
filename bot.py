@@ -4,7 +4,7 @@ import uuid
 import logging
 import asyncio
 from hydrogram import Client, filters
-from hydrogram.types import Message
+from hydrogram.types import Message, InputMediaPhoto, InputMediaVideo
 
 # Optimization & Network Patches
 import crypto_patch
@@ -46,8 +46,8 @@ async def start_handler(client: Client, message: Message):
         "• 📺 **YouTube** (Videos & Shorts up to 1080p)\n"
         "• 🎵 **SoundCloud** (High quality 320kbps MP3)\n"
         "• 📱 **TikTok** (Watermark-free HD videos)\n"
-        "• 📸 **Instagram** (Reels & Posts)\n"
-        "• 📌 **Pinterest** (Videos & Pins)\n"
+        "• 📸 **Instagram** (Reels, Posts, Carousels & Photos)\n"
+        "• 📌 **Pinterest** (Videos & Pins/Images)\n"
         "• 🐦 **Twitter / X & Reddit**\n\n"
         "💡 **Pro-Tip:** Send `/audio <link>` or `/mp3 <link>` to convert any YouTube or video link into an MP3 song!"
     )
@@ -116,6 +116,20 @@ async def media_handler(client: Client, message: Message):
                 photo=result.file_path,
                 caption=result.caption
             )
+        elif result.media_type == "album":
+            # Send up to 10 photos per album (Telegram limit)
+            for chunk_start in range(0, len(result.file_paths), 10):
+                chunk = result.file_paths[chunk_start:chunk_start+10]
+                media_group = [
+                    InputMediaPhoto(p, caption=result.caption if chunk_start == 0 and i == 0 else "")
+                    for i, p in enumerate(chunk)
+                ]
+                await client.send_media_group(chat_id=message.chat.id, media=media_group)
+        elif result.media_type == "document":
+            await message.reply_document(
+                document=result.file_path,
+                caption=result.caption
+            )
 
         # Delete status message on success
         try:
@@ -125,7 +139,7 @@ async def media_handler(client: Client, message: Message):
 
     except Exception as e:
         logger.exception(f"Error processing {text}: {e}")
-        error_text = f"❌ **Download failed**: `{str(e)[:200]}`"
+        error_text = f"❌ **Download failed**: `{str(e)[:250]}`"
         try:
             await status_msg.edit_text(error_text)
         except Exception:
