@@ -55,6 +55,19 @@ def is_authorized(user_id: int) -> bool:
         return True
     return user_id in ALLOWED_USERS
 
+@app.on_message(filters.command(["status"]))
+async def status_handler(client: Client, message: Message):
+    from downloader.generic import get_ffmpeg_path
+    ff = get_ffmpeg_path()
+    status_text = (
+        "🤖 **Media Downloader Bot Status**\n\n"
+        f"• 🟢 **Online & Ready**: 24/7\n"
+        f"• 🎬 **FFmpeg Engine**: `{'Active ✅' if ff else 'Missing ❌'}`\n"
+        f"• 📁 **Binary Path**: `{ff or 'None'}`\n"
+        f"• ⚡ **Version**: `v1.3 (Quality Selection Active)`\n"
+    )
+    await message.reply_text(status_text)
+
 @app.on_message(filters.command(["start", "help"]))
 async def start_handler(client: Client, message: Message):
     welcome_text = (
