@@ -80,6 +80,18 @@ async def download_spotify(spotify_url: str, output_dir: str) -> MediaResult:
     search_query = f"ytsearch1:{artist} - {title} audio"
     out_template = os.path.join(output_dir, f"{artist} - {title}.%(ext)s")
 
+    cookie_file = None
+    if os.path.exists("cookies.txt"):
+        cookie_file = os.path.abspath("cookies.txt")
+    elif os.environ.get("YOUTUBE_COOKIES"):
+        cookie_path = os.path.join(output_dir, "cookies.txt")
+        try:
+            with open(cookie_path, "w", encoding="utf-8") as f:
+                f.write(os.environ["YOUTUBE_COOKIES"])
+            cookie_file = cookie_path
+        except Exception:
+            pass
+
     ydl_opts = {
         "format": "bestaudio/best",
         "outtmpl": out_template,
@@ -90,7 +102,14 @@ async def download_spotify(spotify_url: str, output_dir: str) -> MediaResult:
         }],
         "quiet": True,
         "no_warnings": True,
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["android", "ios", "mweb"]
+            }
+        },
     }
+    if cookie_file and os.path.exists(cookie_file):
+        ydl_opts["cookiefile"] = cookie_file
 
     loop = asyncio.get_running_loop()
 

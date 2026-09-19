@@ -117,13 +117,16 @@ async def media_handler(client: Client, message: Message):
                 caption=result.caption
             )
         elif result.media_type == "album":
-            # Send up to 10 photos per album (Telegram limit)
+            # Send up to 10 media items per album (Telegram limit)
             for chunk_start in range(0, len(result.file_paths), 10):
                 chunk = result.file_paths[chunk_start:chunk_start+10]
-                media_group = [
-                    InputMediaPhoto(p, caption=result.caption if chunk_start == 0 and i == 0 else "")
-                    for i, p in enumerate(chunk)
-                ]
+                media_group = []
+                for i, p in enumerate(chunk):
+                    cap = result.caption if (chunk_start == 0 and i == 0) else ""
+                    if p.lower().endswith((".mp4", ".mkv", ".webm", ".mov")):
+                        media_group.append(InputMediaVideo(p, caption=cap))
+                    else:
+                        media_group.append(InputMediaPhoto(p, caption=cap))
                 await client.send_media_group(chat_id=message.chat.id, media=media_group)
         elif result.media_type == "document":
             await message.reply_document(
