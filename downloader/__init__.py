@@ -6,16 +6,22 @@ from downloader.base import MediaResult
 
 logger = logging.getLogger(__name__)
 
-async def download_media(url: str, output_dir: str, force_audio: bool = False) -> MediaResult:
+async def download_media(
+    url: str,
+    output_dir: str,
+    force_audio: bool = False,
+    target_quality: int | None = None
+) -> MediaResult:
     """
     Identifies the URL platform and downloads media in the optimal format.
+    Supports quality selection (1080p, 720p, 480p, 360p) for video links.
     """
     detection = detect_url(url)
     if not detection:
         raise ValueError("No supported URL detected in the message.")
 
     platform, clean_url = detection
-    logger.info(f"Detected platform: {platform} for URL: {clean_url}")
+    logger.info(f"Detected platform: {platform} for URL: {clean_url} (Quality: {target_quality})")
 
     if platform == "spotify":
         return await download_spotify(clean_url, output_dir)
@@ -23,4 +29,9 @@ async def download_media(url: str, output_dir: str, force_audio: bool = False) -
         return await download_generic(clean_url, output_dir, is_audio_only=True)
     else:
         # YouTube, TikTok, Instagram, Pinterest, Twitter, Reddit, etc.
-        return await download_generic(clean_url, output_dir, is_audio_only=False)
+        return await download_generic(
+            clean_url,
+            output_dir,
+            is_audio_only=False,
+            target_quality=target_quality
+        )

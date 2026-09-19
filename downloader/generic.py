@@ -4,13 +4,13 @@ import asyncio
 import logging
 import yt_dlp
 from downloader.base import MediaResult
-from downloader.instagram_patch import apply_instagram_patch
+from downloader.universal_patch import apply_universal_patch
 from utils.media_tagger import generate_video_thumbnail
 
 logger = logging.getLogger(__name__)
 
-# Apply Instagram photo and carousel patch
-apply_instagram_patch()
+# Apply Universal photo & platform patches
+apply_universal_patch()
 
 def _get_cookiefile(output_dir: str) -> str | None:
     """Check for local cookies.txt or YOUTUBE_COOKIES environment variable."""
@@ -28,9 +28,14 @@ def _get_cookiefile(output_dir: str) -> str | None:
             logger.warning(f"Failed to write cookies from environment: {e}")
     return None
 
-async def download_generic(url: str, output_dir: str, is_audio_only: bool = False) -> MediaResult:
+async def download_generic(
+    url: str,
+    output_dir: str,
+    is_audio_only: bool = False,
+    target_quality: int | None = None
+) -> MediaResult:
     """
-    Downloads media using yt-dlp (supports YouTube, TikTok, Instagram, SoundCloud, Pinterest, X, Reddit, etc.)
+    Downloads media using yt-dlp with support for all platforms, dynamic video quality, and photos.
     """
     os.makedirs(output_dir, exist_ok=True)
     out_template = os.path.join(output_dir, "%(title).50s_%(id)s.%(ext)s")
@@ -60,8 +65,15 @@ async def download_generic(url: str, output_dir: str, is_audio_only: bool = Fals
                 "preferredquality": "320",
             }]
     else:
+        max_q = target_quality or 1080
         if has_ffmpeg:
-            format_selector = "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best/photo"
+            format_selector = (
+                f"bestvideo[height<={max_q}][ext=mp4]+bestaudio[ext=m4a]/"
+                f"bestvideo[height<={max_q}]+bestaudio/"
+                f"best[height<={max_q}][ext=mp4]/"
+                f"best[height<={max_q}]/"
+                f"best/photo"
+            )
             ydl_opts = {
                 "format": format_selector,
                 "outtmpl": out_template,
@@ -72,7 +84,7 @@ async def download_generic(url: str, output_dir: str, is_audio_only: bool = Fals
                 "extractor_args": extractor_args,
             }
         else:
-            format_selector = "best[ext=mp4]/best/photo"
+            format_selector = f"best[height<={max_q}][ext=mp4]/best[height<={max_q}]/best/photo"
             ydl_opts = {
                 "format": format_selector,
                 "outtmpl": out_template,
@@ -125,6 +137,7 @@ async def download_generic(url: str, output_dir: str, is_audio_only: bool = Fals
             new_thumb = os.path.join(output_dir, "thumb.jpg")
             thumb_path = generate_video_thumbnail(main_file, new_thumb)
 
+        quality_badge = f" [{height}p]" if height else ""
         return MediaResult(
             media_type="video",
             file_path=main_file,
@@ -134,7 +147,7 @@ async def download_generic(url: str, output_dir: str, is_audio_only: bool = Fals
             width=width,
             height=height,
             thumbnail_path=thumb_path,
-            caption=f"🎬 **{title}**"
+            caption=f"🎬 **{title}**{quality_badge}"
         )
 
     # Audio only or audio file returned
@@ -153,7 +166,6 @@ async def download_generic(url: str, output_dir: str, is_audio_only: bool = Fals
 
     # Carousel or multiple media items (photos or videos)
     elif len(video_files) > 1 or (video_files and standalone_photos) or len(standalone_photos) > 1:
-        # Combine standalone photos and videos in album
         album_files = standalone_photos + video_files
         return MediaResult(
             media_type="album",
