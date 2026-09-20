@@ -1,6 +1,7 @@
 import os
 import shutil
 import asyncio
+import copy
 import logging
 import yt_dlp
 from downloader.base import MediaResult
@@ -168,7 +169,7 @@ async def download_generic(
 
     extractor_args = {
         "youtube": {
-            "player_client": ["ios", "visionos", "web_embedded", "tv_downgraded"]
+            "player_client": ["android", "ios", "visionos", "web"]
         }
     }
 
@@ -249,8 +250,22 @@ async def download_generic(
     loop = asyncio.get_running_loop()
 
     def _extract_and_download():
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            return ydl.extract_info(url, download=True)
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                return ydl.extract_info(url, download=True)
+        except Exception as e:
+            err_str = str(e).lower()
+            if "reloaded" in err_str or "bot" in err_str or "sign in" in err_str:
+                logger.warning(f"Primary YouTube client failed with '{e}'. Retrying with pure mobile fallback client matrix...")
+                fallback_opts = copy.deepcopy(ydl_opts)
+                fallback_opts["extractor_args"] = {
+                    "youtube": {
+                        "player_client": ["android", "visionos"]
+                    }
+                }
+                with yt_dlp.YoutubeDL(fallback_opts) as ydl_fb:
+                    return ydl_fb.extract_info(url, download=True)
+            raise
 
     info = await loop.run_in_executor(None, _extract_and_download)
 

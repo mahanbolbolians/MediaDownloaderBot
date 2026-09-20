@@ -4,6 +4,7 @@ import urllib.request
 import urllib.parse
 import json
 import asyncio
+import copy
 import logging
 import subprocess
 import yt_dlp
@@ -284,7 +285,7 @@ async def download_spotify(spotify_url: str, output_dir: str) -> MediaResult:
 
     extractor_args = {
         "youtube": {
-            "player_client": ["ios", "visionos", "web_embedded", "tv_downgraded"]
+            "player_client": ["android", "ios", "visionos", "web"]
         }
     }
 
@@ -317,8 +318,22 @@ async def download_spotify(spotify_url: str, output_dir: str) -> MediaResult:
     loop = asyncio.get_running_loop()
 
     def _download(target: str):
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            return ydl.extract_info(target, download=True)
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                return ydl.extract_info(target, download=True)
+        except Exception as e:
+            err_str = str(e).lower()
+            if "reloaded" in err_str or "bot" in err_str or "sign in" in err_str:
+                logger.warning(f"Primary YouTube client failed with '{e}'. Retrying with pure mobile fallback client matrix...")
+                fallback_opts = copy.deepcopy(ydl_opts)
+                fallback_opts["extractor_args"] = {
+                    "youtube": {
+                        "player_client": ["android", "visionos"]
+                    }
+                }
+                with yt_dlp.YoutubeDL(fallback_opts) as ydl_fb:
+                    return ydl_fb.extract_info(target, download=True)
+            raise
 
     def _has_audio(d: str) -> bool:
         return any(
