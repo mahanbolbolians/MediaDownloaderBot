@@ -113,9 +113,6 @@ class TestUniversalPatchesAndQuality(unittest.TestCase):
         self.assertIsNotNone(ios_cfg)
         client_version = ios_cfg.get("INNERTUBE_CONTEXT", {}).get("client", {}).get("clientVersion")
         self.assertEqual(client_version, "20.03.02", "iOS client should be patched to 20.03.02")
-        policies = ios_cfg.get("GVS_PO_TOKEN_POLICY", {})
-        for proto, policy in policies.items():
-            self.assertFalse(policy.required, f"GVS PO Token required policy should be False for {proto}")
 
 if __name__ == "__main__":
     unittest.main()

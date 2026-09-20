@@ -169,7 +169,7 @@ async def download_generic(
 
     extractor_args = {
         "youtube": {
-            "player_client": ["android", "ios", "visionos", "web"]
+            "player_client": ["visionos", "android", "web"]
         }
     }
 
@@ -255,12 +255,14 @@ async def download_generic(
                 return ydl.extract_info(url, download=True)
         except Exception as e:
             err_str = str(e).lower()
-            if "reloaded" in err_str or "bot" in err_str or "sign in" in err_str:
-                logger.warning(f"Primary YouTube client failed with '{e}'. Retrying with pure mobile fallback client matrix...")
+            if any(k in err_str for k in ("403", "forbidden", "reloaded", "bot", "sign in", "format is not available")):
+                logger.warning(f"Primary YouTube client failed with '{e}'. Retrying with resilient fallback matrix...")
                 fallback_opts = copy.deepcopy(ydl_opts)
+                if "cookiefile" in fallback_opts:
+                    fallback_opts.pop("cookiefile", None)
                 fallback_opts["extractor_args"] = {
                     "youtube": {
-                        "player_client": ["android", "visionos"]
+                        "player_client": ["visionos", "android"]
                     }
                 }
                 with yt_dlp.YoutubeDL(fallback_opts) as ydl_fb:
