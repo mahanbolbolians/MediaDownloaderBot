@@ -27,6 +27,16 @@ if _active_ffmpeg:
 else:
     logging.warning("[-] FFmpeg not detected in system or imageio-ffmpeg bundles!")
 
+# Persistent cookies initialization for Railway & cloud environments
+_cookies_env = os.environ.get("YOUTUBE_COOKIES") or os.environ.get("COOKIES") or os.environ.get("COOKIES_TXT")
+if _cookies_env and not os.path.exists("cookies.txt"):
+    try:
+        with open("cookies.txt", "w", encoding="utf-8") as f:
+            f.write(_cookies_env.strip())
+        logging.info("[+] Successfully initialized cookies.txt from environment variable.")
+    except Exception as e:
+        logging.warning(f"[-] Failed to write cookies.txt: {e}")
+
 from config import config
 from downloader import download_media
 from downloader.detector import detect_url
@@ -68,13 +78,16 @@ async def status_handler(client: Client, message: Message):
     ff = ensure_ffmpeg()
     js = get_js_runtimes_config()
     js_name = list(js.keys())[0] if js else "None"
+    has_cookies = os.path.exists("cookies.txt") and os.path.getsize("cookies.txt") > 0
+    cookie_status = "Active ✅" if has_cookies else "Not set (Recommended for Railway)"
     status_text = (
         "🤖 **Media Downloader Bot Status**\n\n"
         f"• 🟢 **Online & Ready**: 24/7\n"
         f"• 🎬 **FFmpeg Engine**: `{'Active ✅' if ff else 'Missing ❌'}`\n"
         f"• 📁 **Binary Path**: `{ff or 'None'}`\n"
         f"• ⚡ **JS Decipher Engine**: `{'Active ✅ (' + js_name + ')' if js else 'Fallback'}`\n"
-        f"• 📦 **Version**: `v1.5 (InnerTube High-Speed Engine)`\n"
+        f"• 🍪 **YouTube Auth**: `{cookie_status}`\n"
+        f"• 📦 **Version**: `v1.6 (Anti-Bot Bypass & Cookie Sync Engine)`\n"
     )
     await message.reply_text(status_text)
 

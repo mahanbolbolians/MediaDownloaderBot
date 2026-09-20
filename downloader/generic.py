@@ -168,7 +168,7 @@ async def download_generic(
 
     extractor_args = {
         "youtube": {
-            "player_client": ["visionos", "web_embedded", "tv_downgraded"]
+            "player_client": ["ios", "visionos", "web_embedded", "tv_downgraded"]
         }
     }
 
@@ -237,6 +237,10 @@ async def download_generic(
 
     if cookie_file and os.path.exists(cookie_file):
         ydl_opts["cookiefile"] = cookie_file
+
+    proxy = os.environ.get("YTDLP_PROXY") or os.environ.get("PROXY")
+    if proxy:
+        ydl_opts["proxy"] = proxy
 
     js_cfg = get_js_runtimes_config()
     if js_cfg:

@@ -169,5 +169,19 @@ def apply_universal_patch():
         return res
     InstagramBaseIE._extract_product_media = patched_ig_extract_product_media
 
+    # --- 4. YouTube iOS Client Anti-Bot Patch ---
+    try:
+        from yt_dlp.extractor.youtube._base import INNERTUBE_CLIENTS
+        ios_cfg = INNERTUBE_CLIENTS.get("ios", {})
+        if ios_cfg and "INNERTUBE_CONTEXT" in ios_cfg:
+            ios_cfg["INNERTUBE_CONTEXT"]["client"]["clientVersion"] = "20.03.02"
+            ios_cfg["INNERTUBE_CONTEXT"]["client"]["userAgent"] = "com.google.ios.youtube/20.03.02 (iPhone16,2; U; CPU iOS 18_2_1 like Mac OS X;)"
+        if "GVS_PO_TOKEN_POLICY" in ios_cfg:
+            for proto, policy in ios_cfg["GVS_PO_TOKEN_POLICY"].items():
+                policy.required = False
+        logger.info("[+] YouTube iOS client anti-bot patch applied.")
+    except Exception as e:
+        logger.warning(f"[-] Could not patch YouTube iOS client: {e}")
+
     _patched = True
     logger.info("[+] Universal photo & video patch applied successfully across all platforms.")

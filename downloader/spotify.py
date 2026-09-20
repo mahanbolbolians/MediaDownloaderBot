@@ -284,7 +284,7 @@ async def download_spotify(spotify_url: str, output_dir: str) -> MediaResult:
 
     extractor_args = {
         "youtube": {
-            "player_client": ["visionos", "web_embedded", "tv_downgraded"]
+            "player_client": ["ios", "visionos", "web_embedded", "tv_downgraded"]
         }
     }
 
@@ -295,6 +295,10 @@ async def download_spotify(spotify_url: str, output_dir: str) -> MediaResult:
         "no_warnings": True,
         "extractor_args": extractor_args,
     }
+
+    proxy = os.environ.get("YTDLP_PROXY") or os.environ.get("PROXY")
+    if proxy:
+        ydl_opts["proxy"] = proxy
 
     if ffmpeg_bin:
         ydl_opts["ffmpeg_location"] = ffmpeg_bin
